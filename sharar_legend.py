@@ -33,42 +33,51 @@ web3 = Web3(Web3.HTTPProvider(SAHARA_RPC_URL))
 
 def check_connection():
     """Check connection to Sahara Testnet"""
-    if web3.is_connected():
-        print("✅ Connected to Sahara Testnet")
-        print(f"⛓ Chain ID: {CHAIN_ID}")
-        print(f"📦 Latest block: {web3.eth.block_number}\n")
-        return True
-    print("❌ Connection failed")
-    return False
+    try:
+        if web3.is_connected():
+            print("✅ Connected to Sahara Testnet")
+            print(f"⛓ Chain ID: {CHAIN_ID}")
+            print(f"📦 Latest block: {web3.eth.block_number}\n")
+            return True
+        print("❌ Connection failed")
+        return False
+    except Exception as e:
+        print(f"❌ Connection error: {str(e)}")
+        return False
+
+def get_contract_code(address):
+    """Check if contract exists at address"""
+    return web3.eth.get_code(address)
 
 def get_balances(wallet_address):
     """Get both native and token balances"""
-    native_balance = web3.eth.get_balance(wallet_address)
-    token_contract = web3.eth.contract(address=SHARAR_LEGEND_CONTRACT, abi=TOKEN_ABI)
-    token_balance = token_contract.functions.balanceOf(wallet_address).call()
-    return {
-        'native': web3.from_wei(native_balance, 'ether'),
-        'tokens': token_balance / (10**18)  # Assuming 18 decimals
-    }
-
-def transfer_tokens(private_key, recipient, amount):
-    """Transfer Sharar Legend tokens"""
-    account = web3.eth.account.from_key(private_key)
-    contract = web3.eth.contract(address=SHARAR_LEGEND_CONTRACT, abi=TOKEN_ABI)
-    
-    tx = contract.functions.transfer(
-        recipient,
-        int(amount * (10**18))  # Convert to wei
-    ).build_transaction({
-        'chainId': CHAIN_ID,
-        'gas': 200000,
-        'gasPrice': web3.to_wei('10', 'gwei'),
-        'nonce': web3.eth.get_transaction_count(account.address),
-    })
-    
-    signed_tx = web3.eth.account.sign_transaction(tx, private_key)
-    tx_hash = web3.eth.send_raw_transaction(signed_tx.rawTransaction)
-    return tx_hash.hex()
+    try:
+        # Check native balance
+        native_balance = web3.eth.get_balance(wallet_address)
+        
+        # Check if contract exists
+        contract_code = get_contract_code(SHARAR_LEGEND_CONTRACT)
+        if contract_code == b'':
+            return {
+                'native': web3.from_wei(native_balance, 'ether'),
+                'tokens': None,
+                'error': 'Contract not deployed at this address'
+            }
+        
+        # Try to get token balance
+        token_contract = web3.eth.contract(address=SHARAR_LEGEND_CONTRACT, abi=TOKEN_ABI)
+        token_balance = token_contract.functions.balanceOf(wallet_address).call()
+        
+        return {
+            'native': web3.from_wei(native_balance, 'ether'),
+            'tokens': token_balance / (10**18)  # Assuming 18 decimals
+        }
+    except Exception as e:
+        return {
+            'native': web3.from_wei(native_balance, 'ether'),
+            'tokens': None,
+            'error': str(e)
+        }
 
 def main():
     print("\n" + "="*50)
@@ -78,24 +87,27 @@ def main():
     if not check_connection():
         exit()
 
-    # Get wallet info
-    private_key = input("Enter private key (or leave blank for balance check): ").strip()
     wallet_address = input("Enter wallet address: ").strip()
     
-    # Get balances
-    balances = get_balances(wallet_address)
-    print(f"\n💎 Native Balance: {balances['native']} SAHARA")
-    print(f"🪙 Token Balance: {balances['tokens']} Sharar Legend")
+    # Validate address
+    if not web3.is_address(wallet_address):
+        print("❌ Invalid wallet address")
+        return
     
-    # Transfer tokens if private key provided
-    if private_key:
-        recipient = input("\nEnter recipient address: ").strip()
-        amount = float(input("Enter amount to send: "))
-        
-        print("\n🚀 Sending transaction...")
-        tx_hash = transfer_tokens(private_key, recipient, amount)
-        print(f"\n✅ Transaction successful!")
-        print(f"🔗 View on explorer: {EXPLORER_URL}/tx/{tx_hash}")
+    balances = get_balances(wallet_address)
+    
+    print(f"\n💎 Native Balance: {balances['native']} SAHARA")
+    
+    if balances.get('error'):
+        print(f"\n❌ Error checking token balance: {balances['error']}")
+        print("\nPossible solutions:")
+        print("1. Verify the contract address is correct")
+        print("2. Check if the token is deployed on this network")
+        print("3. The ABI might not match the actual contract")
+    elif balances['tokens'] is not None:
+        print(f"🪙 Token Balance: {balances['tokens']} Sharar Legend")
+    else:
+        print("🪙 Token Balance: Not available")
 
 if __name__ == "__main__":
     main()
