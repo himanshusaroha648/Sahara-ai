@@ -18,8 +18,8 @@ Sahara LAB Auto Bot is a powerful and efficient automation script designed to st
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/Kazuha787/Sahara-Ai.git
-   cd Sahara-Ai
+   git clone https://github.com/himanshusaroha648/Sahara-ai.git
+   cd Sahara-ai
    ```
 
 2. Install dependencies:
