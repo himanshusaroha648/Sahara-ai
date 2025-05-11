@@ -33,7 +33,8 @@ const colorMap = {
     green: chalk.green,
     blue: chalk.blue,
     yellow: chalk.yellow,
-    red: chalk.red
+    red: chalk.red,
+    violet: chalk.magenta
 };
 
 function log(address, message, color = 'green') {
@@ -146,16 +147,91 @@ async function sendTaskClaim(accessToken, taskID, address) {
     const responseData = await response.json();
     
     if (!response.ok) {
-        throw new Error(`❌ Claim failed: ${response.statusText} - ${JSON.stringify(responseData)}`);
+        return; // Silently handle the error without logging
     }
 
     if (responseData.success) {
         log(address, `✅ Task ${taskID} - Successfully claimed.`);
-    } else {
-        throw new Error(`❌ Claim failed: ${responseData.message || 'Unknown error'}`);
     }
 }
 
+// Add these variables at the top level
+let alreadyClaimedCount = 0;
+let notTransactionCount = 0;
+let taskSuccessCount = 0;
+
+async function sendDailyTask(wallet, index, total) {
+    try {
+        log(wallet.address, `🔹 Processing wallet: ${wallet.address} [ ${index + 1}/${total} ]`);
+        const { accessToken } = await signChallenge(wallet);
+        if (!accessToken) {
+            throw new Error(`❌ Access token not found!`);
+        }
+
+        const taskID = "1004";  // Only task 1004
+        const taskStatus = await sendCheckTask(accessToken, taskID, wallet.address);
+        
+        if (taskStatus.completed && taskStatus.status !== "3") {
+            log(wallet.address, "✅ Task completed successfully.");
+        }
+        log("", "");
+    } catch (error) {
+        if (error.message.includes('insufficient funds')) {
+            log(wallet.address, "insufficient funds", 'violet');
+        } else {
+            log(wallet.address, `❌ Error: ${error.message}`);
+        }
+    }
+}
+
+// Modify the startBot function
+async function startBot() {
+    try {
+        fs.writeFileSync(logFile, "");
+        const privateKeys = fs.readFileSync('privatekeys.txt', 'utf-8').split('\n').map(line => line.trim()).filter(Boolean);
+        const totalWallets = privateKeys.length;
+
+        // Reset counters
+        alreadyClaimedCount = 0;
+        notTransactionCount = 0;
+        taskSuccessCount = 0;
+
+        for (let i = 0; i < privateKeys.length; i++) {
+            const wallet = new ethers.Wallet(privateKeys[i]);
+            log("", `🔹 Processing wallet: ${wallet.address} [ ${i + 1}/${totalWallets} ]`);
+            
+            // Process one wallet at a time
+            await sendDailyTask(wallet, i, totalWallets);
+            
+            // Add a small delay between wallets
+            await delay(5000);
+        }
+
+        // Add a delay before showing final stats
+        await delay(3000);
+        
+        // Display final statistics
+        console.log("\n");
+        console.log(chalk.blue("=== Final Statistics ==="));
+        console.log(chalk.yellow(`already claimed  [ ${alreadyClaimedCount} ]`));
+        console.log(chalk.yellow(`Not Transaction  [ ${notTransactionCount} ]`));
+        console.log(chalk.green(`Task successfully [ ${taskSuccessCount} ]`));
+        console.log(chalk.blue("====================="));
+        console.log("\n");
+
+        // Also log to file
+        logToFile("\n=== Final Statistics ===");
+        logToFile(`already claimed  [ ${alreadyClaimedCount} ]`);
+        logToFile(`Not Transaction  [ ${notTransactionCount} ]`);
+        logToFile(`Task successfully [ ${taskSuccessCount} ]`);
+        logToFile("=====================\n");
+
+    } catch (error) {
+        console.error("Error in startBot:", error);
+    }
+}
+
+// Modify sendCheckTask to track statistics
 async function sendCheckTask(accessToken, taskID, address) {
     log(address, `🔹 Checking Task ${taskID} status...`, 'blue');
     await delay(5000);
@@ -182,9 +258,10 @@ async function sendCheckTask(accessToken, taskID, address) {
         if (flushResponse.ok) {
             const flushData = await flushResponse.json();
             if (flushData === 2) {
-                log(address, `🔄 One Transaction`, 'yellow');
+                log(address, `🔄 One Transaction Featching....`, 'yellow');
             } else if (flushData === 4) {
                 log(address, `✅ Task ${taskID} already claimed.`, 'yellow');
+                alreadyClaimedCount++;
                 return {
                     completed: true,
                     progress: 100,
@@ -232,18 +309,23 @@ async function sendCheckTask(accessToken, taskID, address) {
             log(address, `🔹 Task ${taskID} is ready to claim...`, 'green');
             await sendTaskClaim(accessToken, taskID, address);
             taskCompleted = true;
+            taskSuccessCount++;
         } else {
             log(address, `⚠️ One Transaction`, 'yellow');
+            notTransactionCount++;
         }
     } else if (status === "2") {
         log(address, `🔹 Task ${taskID} is claimable, claiming reward...`, 'green');
         await sendTaskClaim(accessToken, taskID, address);
         taskCompleted = true;
+        taskSuccessCount++;
     } else if (status === "3") {
         log(address, `✅ Task ${taskID} already claimed.`, 'yellow');
+        alreadyClaimedCount++;
         taskCompleted = true;
     } else {
         log(address, `⚠️ One Transaction`, 'yellow');
+        notTransactionCount++;
     }
 
     return {
@@ -252,44 +334,6 @@ async function sendCheckTask(accessToken, taskID, address) {
         requiredProgress: requiredProgress,
         status: status
     };
-}
-
-async function sendDailyTask(wallet, index, total) {
-    try {
-        log(wallet.address, `🔹 Processing wallet: ${wallet.address} [ ${index + 1}/${total} ]`);
-        const { accessToken } = await signChallenge(wallet);
-        if (!accessToken) {
-            throw new Error(`❌ Access token not found!`);
-        }
-
-        const taskID = "1004";  // Only task 1004
-        const taskStatus = await sendCheckTask(accessToken, taskID, wallet.address);
-        
-        if (taskStatus.completed && taskStatus.status !== "3") {
-            log(wallet.address, "✅ Task completed successfully.");
-        }
-        log("", "");
-    } catch (error) {
-        log(wallet.address, `❌ Error: ${error.message}`);
-    }
-}
-
-// Start bot with private keys
-async function startBot() {
-    fs.writeFileSync(logFile, "");
-    const privateKeys = fs.readFileSync('privatekeys.txt', 'utf-8').split('\n').map(line => line.trim()).filter(Boolean);
-    const totalWallets = privateKeys.length;
-
-    for (let i = 0; i < privateKeys.length; i++) {
-        const wallet = new ethers.Wallet(privateKeys[i]);
-        log("", `🔹 Processing wallet: ${wallet.address} [ ${i + 1}/${totalWallets} ]`);
-        
-        // Process one wallet at a time
-        await sendDailyTask(wallet, i, totalWallets);
-        
-        // Add a small delay between wallets
-        await delay(5000);
-    }
 }
 
 export default startBot;
