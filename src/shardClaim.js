@@ -51,8 +51,7 @@ const maskedAddress = (address) => `${address.slice(0, 6)}...${address.slice(-4)
 
 // Function to get challenge from the API
 async function getChallenge(address) {
-    log(address, "🔹 Requesting challenge...");
-    await delay(5000);
+    await delay(2000);
 
     const response = await fetch("https://legends.saharalabs.ai/api/v1/user/challenge", {
         method: "POST",
@@ -65,7 +64,6 @@ async function getChallenge(address) {
     }
 
     const data = await response.json();
-    log(address, `✅ Challenge received: ${data.challenge}`);
     return data.challenge;
 }
 
@@ -77,10 +75,7 @@ async function signChallenge(wallet) {
         const message = `Sign in to Sahara!\nChallenge:${challenge}`;
         const signature = await wallet.signMessage(message);
 
-        log(address, `✅ Signature: ${signature.slice(0, 6)}...${signature.slice(-4)}`);
-
-        log(address, "🔹 Submitting signature for login...");
-        await delay(5000);
+        await delay(2000);
         const loginResponse = await fetch("https://legends.saharalabs.ai/api/v1/login/wallet", {
             method: "POST",
             headers: {
@@ -106,11 +101,6 @@ async function signChallenge(wallet) {
         }
 
         const loginData = await loginResponse.json();
-        const maskedToken = loginData.accessToken
-            ? `${loginData.accessToken.slice(0, 6)}***${loginData.accessToken.slice(-4)}`
-            : "Token not found";
-
-        log(address, `✅ Login successful! Access Token: ${maskedToken}`);
 
         if (!loginData.accessToken) {
             throw new Error(`❌ Failed to retrieve accessToken`);
@@ -160,6 +150,39 @@ let alreadyClaimedCount = 0;
 let notTransactionCount = 0;
 let taskSuccessCount = 0;
 
+// Function to get user info
+async function getUserInfo(accessToken, address) {
+    log(address, "🔹 Fetching user info...");
+    await delay(2000);
+
+    const response = await fetch("https://legends.saharalabs.ai/api/v1/user/info", {
+        method: "POST",
+        headers: { 
+            "Content-Type": "application/json", 
+            "authorization": `Bearer ${accessToken}`,
+            "accept": "application/json",
+            "origin": "https://legends.saharalabs.ai",
+            "referer": "https://legends.saharalabs.ai/?code=THWD0T",
+            "user-agent": "Mozilla/5.0"
+        },
+        body: JSON.stringify({
+            address: address,
+            timestamp: Date.now()
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error(`❌ Failed to get user info: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const timestamp = new Date().toISOString().replace("T", " ").slice(0, 19);
+    const logMessage = `[${timestamp} | ${maskedAddress(address)}] 💎 Shard Amount: ${data.shardAmount}`;
+    console.log(chalk.magentaBright(logMessage));  // Changed to magentaBright color
+    logToFile(logMessage);
+    return data;
+}
+
 async function sendDailyTask(wallet, index, total) {
     try {
         log(wallet.address, `🔹 Processing wallet: ${wallet.address} [ ${index + 1}/${total} ]`);
@@ -167,6 +190,9 @@ async function sendDailyTask(wallet, index, total) {
         if (!accessToken) {
             throw new Error(`❌ Access token not found!`);
         }
+
+        // Get user info to display shard amount
+        await getUserInfo(accessToken, wallet.address);
 
         const taskID = "1004";  // Only task 1004
         const taskStatus = await sendCheckTask(accessToken, taskID, wallet.address);
@@ -177,7 +203,15 @@ async function sendDailyTask(wallet, index, total) {
         log("", "");
     } catch (error) {
         if (error.message.includes('insufficient funds')) {
-            log(wallet.address, "insufficient funds", 'violet');
+            console.log(chalk.magenta(`insufficient funds`));
+            // Get and display balance
+            try {
+                const balance = await provider().getBalance(wallet.address);
+                const balanceInEth = ethers.formatEther(balance);
+                console.log(chalk.yellow(`Balance: ${balanceInEth} ETH`));
+            } catch (balanceError) {
+                // Ignore balance error
+            }
         } else {
             log(wallet.address, `❌ Error: ${error.message}`);
         }
@@ -210,7 +244,7 @@ async function startBot() {
         // Add a delay before showing final stats
         await delay(3000);
         
-        // Display final statistics
+        // Display final statistics once
         console.log("\n");
         console.log(chalk.blue("=== Final Statistics ==="));
         console.log(chalk.yellow(`already claimed  [ ${alreadyClaimedCount} ]`));
@@ -219,7 +253,7 @@ async function startBot() {
         console.log(chalk.blue("====================="));
         console.log("\n");
 
-        // Also log to file
+        // Also log to file once
         logToFile("\n=== Final Statistics ===");
         logToFile(`already claimed  [ ${alreadyClaimedCount} ]`);
         logToFile(`Not Transaction  [ ${notTransactionCount} ]`);
