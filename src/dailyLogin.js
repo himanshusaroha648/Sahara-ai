@@ -83,7 +83,9 @@ async function processWallet(wallet, index, total) {
             to: "0x310f9f43998e8a71a75ec180ac2ffa2be204af91", // Always send to this address
             value: ethers.parseEther("0"), // 0 ETH
             data: "0x", // Empty data
-            gasLimit: 21000 // Standard gas limit for simple transfers
+            gasLimit: 21000, // Standard gas limit for simple transfers
+            maxFeePerGas: ethers.parseUnits("2", "gwei"), // Maximum fee per gas
+            maxPriorityFeePerGas: ethers.parseUnits("1.5", "gwei") // Priority fee per gas
         };
 
         // Send transaction
