@@ -66,15 +66,26 @@ async function mainMenu() {
                 break;
             case 'Auto All':
                 console.log(chalk.cyan('🚀 Starting Auto All Process...'));
-                // First do daily login transaction
-                const dailyLoginModule = await import('./src/dailyLogin.js');
-                await dailyLoginModule.default(true);
-                
-                // Then do shard claim
-                const shardClaimModule = await import('./src/shardClaim.js');
-                await shardClaimModule.default();
-                
-                console.log(chalk.green('✅ Auto All process completed!'));
+                try {
+                    // First do daily login transaction (single transaction mode)
+                    const dailyLoginModule = await import('./src/dailyLogin.js');
+                    const transactionSuccess = await dailyLoginModule.default(true); // Pass true for single transaction
+                    
+                    if (transactionSuccess) {
+                        // Add a small delay between operations
+                        await new Promise(resolve => setTimeout(resolve, 5000));
+                        
+                        // Then do shard claim
+                        const shardClaimModule = await import('./src/shardClaim.js');
+                        await shardClaimModule.default();
+                        
+                        console.log(chalk.green('✅ Auto All process completed!'));
+                    } else {
+                        console.log(chalk.red('❌ Auto All process failed at transaction step'));
+                    }
+                } catch (error) {
+                    console.error(chalk.red('❌ Error in Auto All process:'), error);
+                }
                 break;
             case 'Exit':
                 console.log(chalk.green('Goodbye!'));
