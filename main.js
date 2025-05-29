@@ -19,7 +19,8 @@ async function mainMenu() {
         console.log(chalk.yellow("1. Daily Login"));
         console.log(chalk.yellow("2. Shard Claim"));
         console.log(chalk.yellow("3. Balance"));
-        console.log(chalk.yellow("4. Exit"));
+        console.log(chalk.yellow("4. Auto All"));
+        console.log(chalk.yellow("5. Exit"));
         console.log(""); // Add a blank line for spacing
 
         // Get user choice
@@ -30,8 +31,8 @@ async function mainMenu() {
                 message: 'Select an option:',
                 validate: (input) => {
                     const num = parseInt(input);
-                    if (isNaN(num) || num < 1 || num > 4) {
-                        return 'Please enter a valid option (1-4)';
+                    if (isNaN(num) || num < 1 || num > 5) {
+                        return 'Please enter a valid option (1-5)';
                     }
                     return true;
                 }
@@ -43,7 +44,8 @@ async function mainMenu() {
             '1': 'Daily Login',
             '2': 'Shard Claim',
             '3': 'Balance',
-            '4': 'Exit'
+            '4': 'Auto All',
+            '5': 'Exit'
         };
 
         const selectedOption = menuOptions[choice];
@@ -61,6 +63,18 @@ async function mainMenu() {
             case 'Balance':
                 const balance = await import('./src/Balance.js');
                 await balance.default();
+                break;
+            case 'Auto All':
+                console.log(chalk.cyan('🚀 Starting Auto All Process...'));
+                // First do daily login transaction
+                const dailyLoginModule = await import('./src/dailyLogin.js');
+                await dailyLoginModule.default(true);
+                
+                // Then do shard claim
+                const shardClaimModule = await import('./src/shardClaim.js');
+                await shardClaimModule.default();
+                
+                console.log(chalk.green('✅ Auto All process completed!'));
                 break;
             case 'Exit':
                 console.log(chalk.green('Goodbye!'));
