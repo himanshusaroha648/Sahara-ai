@@ -67,15 +67,15 @@ async function mainMenu() {
             case 'Auto All':
                 console.log(chalk.cyan('🚀 Starting Auto All Process...'));
                 try {
-                    // First do daily login transaction (single transaction mode)
+                    // Do daily login transaction (single transaction mode)
                     const dailyLoginModule = await import('./src/dailyLogin.js');
                     const transactionSuccess = await dailyLoginModule.default(true); // Pass true for single transaction
                     
                     if (transactionSuccess) {
-                        // Add a small delay between operations
-                        await new Promise(resolve => setTimeout(resolve, 5000));
+                        // Add a small delay between transaction and tasks
+                        await new Promise(resolve => setTimeout(resolve, 2000));
                         
-                        // Then do shard claim
+                        // Complete tasks using shardClaim module
                         const shardClaimModule = await import('./src/shardClaim.js');
                         await shardClaimModule.default();
                         
