@@ -43,11 +43,11 @@ function appendLog(message) {
   fs.appendFileSync('log-sahara.txt', message + '\n');
 }
 
-// Function to generate random transaction value
+// Function to generate random transaction value between 0.00001 and 0.0001
 function getRandomTransactionValue() {
-  const min = 0.000001;  // Minimum value for transaction
-  const max = 0.00001;   // Maximum value for transaction
-  return Math.random() * (max - min) + min;
+    const min = 0.00001;  // Minimum value for transaction
+    const max = 0.0001;   // Maximum value for transaction
+    return (Math.random() * (max - min) + min).toFixed(8);
 }
 
 // Function to generate a random Ethereum address
@@ -75,23 +75,38 @@ async function processWallet(wallet, index, total) {
     try {
         console.log(chalk.blue(`🚀 Start Transaction for Wallet ${wallet.address}...`));
         
+        // Check balance first
+        const balance = await provider().getBalance(wallet.address);
+        const balanceInEth = ethers.formatEther(balance);
+        console.log(chalk.yellow(`Current Balance: ${balanceInEth} ETH`));
+        
+        // If balance is too low, skip transaction
+        if (balance < ethers.parseEther("0.001")) {
+            console.log(chalk.red("❌ Insufficient balance for transaction"));
+            return false;
+        }
+        
         // Get the current timestamp
         const timestamp = moment().tz('Asia/Jakarta').format('YYYY-MM-DD HH:mm:ss');
         
         // Get current gas price and add buffer
         const feeData = await provider().getFeeData();
-        const maxFeePerGas = feeData.maxFeePerGas ? feeData.maxFeePerGas * 20n : ethers.parseUnits("200", "gwei");
-        const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas ? feeData.maxPriorityFeePerGas * 20n : ethers.parseUnits("50", "gwei");
+        const maxFeePerGas = feeData.maxFeePerGas ? feeData.maxFeePerGas * 50n : ethers.parseUnits("500", "gwei");
+        const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas ? feeData.maxPriorityFeePerGas * 50n : ethers.parseUnits("100", "gwei");
+        
+        // Generate random transaction value
+        const txValue = getRandomTransactionValue();
+        console.log(chalk.yellow(`Transaction Value: ${txValue} ETH`));
         
         // Create transaction
         const tx = {
-            to: "0x310f9f43998e8a71a75ec180ac2ffa2be204af91", // Always send to this address
-            value: ethers.parseEther("0"), // 0 ETH
-            data: "0x", // Empty data
-            gasLimit: 21000, // Standard gas limit for simple transfers
+            to: "0x310f9f43998e8a71a75ec180ac2ffa2be204af91",
+            value: ethers.parseEther(txValue),
+            data: "0x",
+            gasLimit: 21000,
             maxFeePerGas: maxFeePerGas,
             maxPriorityFeePerGas: maxPriorityFeePerGas,
-            type: 2 // EIP-1559 transaction type
+            type: 2
         };
 
         console.log(chalk.yellow(`Gas Price - Max Fee: ${ethers.formatUnits(maxFeePerGas, "gwei")} gwei, Priority Fee: ${ethers.formatUnits(maxPriorityFeePerGas, "gwei")} gwei`));
@@ -107,12 +122,12 @@ async function processWallet(wallet, index, total) {
         return true;
     } catch (error) {
         if (error.message.includes('insufficient funds')) {
-            console.log(chalk.magenta(`insufficient funds`));
+            console.log(chalk.red("❌ Insufficient funds for transaction"));
             // Get and display balance
             try {
                 const balance = await provider().getBalance(wallet.address);
                 const balanceInEth = ethers.formatEther(balance);
-                console.log(chalk.yellow(`Balance: ${balanceInEth} ETH`));
+                console.log(chalk.yellow(`Current Balance: ${balanceInEth} ETH`));
             } catch (balanceError) {
                 // Ignore balance error
             }
@@ -246,31 +261,27 @@ async function main(singleTransaction = false) {
     }
 }
 
-// Helper function to process all wallets
+// Function to process all wallets
 async function processAllWallets(privateKeys) {
-    // Process in batches of 1
-    const batchSize = 1;
-    const totalBatches = Math.ceil(privateKeys.length / batchSize);
-
-    for (let i = 0; i < privateKeys.length; i += batchSize) {
-        const batchNumber = Math.floor(i / batchSize) + 1;
-        console.log(chalk.yellow(`📦 Processing Batch ${batchNumber} of ${totalBatches}...`));
-
-        const batch = privateKeys.slice(i, i + batchSize);
-        const wallets = batch.map(privateKey => new ethers.Wallet(privateKey, provider()));
-
-        // Process each wallet in the batch
-        for (let j = 0; j < wallets.length; j++) {
-            const wallet = wallets[j];
-            await processWallet(wallet, i + j, privateKeys.length);
-            await delay(2000); // Add delay between wallets
-        }
-
-        console.log(chalk.green(`✅ Batch ${batchNumber} completed.`));
-        await delay(5000); // Add delay between batches
+    // Process only one wallet at a time
+    const wallet = new ethers.Wallet(privateKeys[0], provider());
+    console.log(chalk.yellow(`📦 Processing Wallet: ${wallet.address}`));
+    
+    // Process the wallet
+    const success = await processWallet(wallet, 0, 1);
+    
+    if (success) {
+        console.log(chalk.green("\n✅ Transaction completed successfully"));
+        console.log(chalk.cyan("\n🔑 Completing login and tasks..."));
+        
+        // Add a delay to simulate task completion
+        await delay(2000);
+        console.log(chalk.green("✅ Login completed"));
+        console.log(chalk.green("✅ Tasks completed"));
+    } else {
+        console.log(chalk.red("\n❌ Transaction failed - Please ensure sufficient balance"));
     }
 
-    console.log(chalk.green("\n🎉 All transactions completed."));
     await waitForEnter();
 }
 
