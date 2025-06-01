@@ -311,6 +311,7 @@ async function getUserInfo(accessToken, address) {
 
 // Function to check and claim task
 async function sendCheckTask(accessToken, taskID, address) {
+    log(address, `⏳ Featching task ${taskID}`, 'blue');
     await delay(5000);
 
     // First flush the task
@@ -333,7 +334,16 @@ async function sendCheckTask(accessToken, taskID, address) {
 
         if (flushResponse.ok) {
             const flushData = await flushResponse.json();
-            if (flushData === 4) {
+            if (flushData === 2) {
+                log(address, `⚠️ One transtation`, 'yellow');
+                return {
+                    completed: false,
+                    progress: 0,
+                    requiredProgress: 100,
+                    status: "1"
+                };
+            } else if (flushData === 4) {
+                log(address, `⚠️ Task ${taskID} - Already claimed`, 'yellow');
                 return {
                     completed: true,
                     progress: 100,
@@ -376,13 +386,18 @@ async function sendCheckTask(accessToken, taskID, address) {
 
     if (status === "1") {
         if (progress >= requiredProgress) {
+            log(address, `✅ Task is claiming`, 'green');
             await sendTaskClaim(accessToken, taskID, address);
             taskCompleted = true;
+        } else {
+            log(address, `⚠️ One transtation`, 'yellow');
         }
     } else if (status === "2") {
+        log(address, `✅ Task is claiming`, 'green');
         await sendTaskClaim(accessToken, taskID, address);
         taskCompleted = true;
     } else if (status === "3") {
+        log(address, `⚠️ Task ${taskID} - Already claimed`, 'yellow');
         taskCompleted = true;
     }
 
@@ -423,6 +438,10 @@ async function sendTaskClaim(accessToken, taskID, address) {
             throw new Error(`❌ Task claim failed: ${JSON.stringify(responseData)}`);
         }
     }
+
+    if (responseData.success) {
+        log(address, `✅ Task is claimed`, 'green');
+    }
 }
 
 // Main function to process all wallets
@@ -430,38 +449,32 @@ async function processAllWallets() {
     try {
         const privateKeys = readPrivateKeys();
         
-        // Process all wallets
+        // Process all task claims
         for (let i = 0; i < privateKeys.length; i++) {
             const privateKey = privateKeys[i];
             const wallet = new ethers.Wallet(privateKey, provider());
             
             try {
+                log(wallet.address, `🔹 Processing Wallet [${i + 1}/${privateKeys.length}]`, 'blue');
                 const { accessToken } = await signChallenge(wallet);
+                log(wallet.address, `✅ Login Success`, 'green');
                 await getUserInfo(accessToken, wallet.address);
                 
-                // Process only task 1004
                 try {
-                    const taskResult = await sendCheckTask(accessToken, "1004", wallet.address);
-                    if (taskResult.completed) {
-                        if (taskResult.status === "3") {
-                            console.log(chalk.yellow(`✅ Task 1004 - Already claimed`));
-                        } else {
-                            console.log(chalk.green(`✅ Task 1004 - Successfully claimed`));
-                        }
-                    }
+                    await sendCheckTask(accessToken, "1004", wallet.address);
                 } catch (taskError) {
                     if (taskError.message.includes('insufficient balance')) {
-                        console.log(chalk.red(`❌ Task 1004 - Insufficient balance`));
+                        log(wallet.address, `❌ Task 1004 - Insufficient balance`, 'red');
                     }
                 }
                 
             } catch (error) {
-                console.log(chalk.red(`❌ Error processing wallet ${i + 1}: ${error.message}`));
-                continue;
+                log(wallet.address, `❌ Error: ${error.message}`, 'red');
             }
             
-            // Add delay between wallets
+            // Add separator between wallets
             if (i < privateKeys.length - 1) {
+                console.log(chalk.cyan('====================================================================='));
                 await delay(5000);
             }
         }
