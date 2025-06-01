@@ -104,30 +104,22 @@ async function mainMenu() {
                     
                     console.log(chalk.cyan(`\n📝 Found ${privateKeys.length} wallets to process`));
                     
-                    // Process all wallets
+                    // Step 1: Process all transactions first
+                    console.log(chalk.cyan('\n📝 Step 1: Processing all transactions...'));
+                    const dailyLoginModule = await import('./src/dailyLogin.js');
                     for (let i = 0; i < privateKeys.length; i++) {
                         console.log(chalk.yellow(`\nProcessing wallet ${i + 1} of ${privateKeys.length}`));
                         const wallet = new ethers.Wallet(privateKeys[i], provider);
-                        
-                        // Step 1: Do transaction
-                        console.log(chalk.cyan('\n📝 Step 1: Performing transaction...'));
-                        const dailyLoginModule = await import('./src/dailyLogin.js');
-                        const txSuccess = await dailyLoginModule.default(true, wallet, true); // Pass true to skip task completion
-                        
-                        if (txSuccess) {
-                            // Step 2: Complete task
-                            console.log(chalk.cyan('\n📝 Step 2: Completing task...'));
-                            const shardClaimModule = await import('./src/shardClaim.js');
-                            await shardClaimModule.default();
-                        } else {
-                            console.log(chalk.red(`❌ Transaction failed for wallet ${i + 1}`));
-                        }
-                        
-                        // Add delay between wallets
+                        await dailyLoginModule.default(true, wallet, true); // Skip task completion
                         if (i < privateKeys.length - 1) {
                             await new Promise(resolve => setTimeout(resolve, 5000));
                         }
                     }
+                    
+                    // Step 2: Process all task claims
+                    console.log(chalk.cyan('\n📝 Step 2: Processing all task claims...'));
+                    const shardClaimModule = await import('./src/shardClaim.js');
+                    await shardClaimModule.default();
                     
                     console.log(chalk.green('\n✅ Auto All process completed!'));
                 } catch (error) {
