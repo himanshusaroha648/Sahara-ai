@@ -3,10 +3,15 @@ import chalk from 'chalk';
 import printBanner from './banner.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
+import { ethers } from 'ethers';
 
 // Get the directory name
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// RPC Provider
+const provider = new ethers.JsonRpcProvider('https://testnet.saharalabs.ai');
 
 // Show banner
 printBanner();
@@ -53,36 +58,78 @@ async function mainMenu() {
         // Handle the selected option
         switch (selectedOption) {
             case 'Daily Login':
-                const dailyLogin = await import('./src/dailyLogin.js');
-                await dailyLogin.default();
+                try {
+                    console.log(chalk.cyan('🚀 Starting Daily Login Transaction...'));
+                    const dailyLoginModule = await import('./src/dailyLogin.js');
+                    await dailyLoginModule.default(true, null, true); // Pass true to skip tasks
+                } catch (error) {
+                    console.error(chalk.red('❌ Error in Daily Login:'), error);
+                }
                 break;
             case 'Shard Claim':
-                const shardClaim = await import('./src/shardClaim.js');
-                await shardClaim.default();
+                try {
+                    console.log(chalk.cyan('🚀 Starting Task Completion...'));
+                    const shardClaimModule = await import('./src/shardClaim.js');
+                    await shardClaimModule.default();
+                } catch (error) {
+                    console.error(chalk.red('❌ Error in Shard Claim:'), error);
+                }
                 break;
             case 'Balance':
-                const balance = await import('./src/Balance.js');
-                await balance.default();
+                try {
+                    const privateKeys = fs.readFileSync('privatekeys.txt', 'utf-8')
+                        .split('\n')
+                        .map(line => line.trim())
+                        .filter(line => line && !line.startsWith('#') && line.length === 64);
+                    
+                    console.log(chalk.cyan('\n=== Wallet Balances ==='));
+                    for (const privateKey of privateKeys) {
+                        const wallet = new ethers.Wallet(privateKey, provider);
+                        const balance = await provider.getBalance(wallet.address);
+                        console.log(chalk.yellow(`${wallet.address}: ${ethers.formatEther(balance)} ETH`));
+                    }
+                    console.log(chalk.cyan('=====================\n'));
+                } catch (error) {
+                    console.error(chalk.red('❌ Error checking balance:'), error);
+                }
                 break;
             case 'Auto All':
                 console.log(chalk.cyan('🚀 Starting Auto All Process...'));
                 try {
-                    // Do daily login transaction (single transaction mode)
-                    const dailyLoginModule = await import('./src/dailyLogin.js');
-                    const transactionSuccess = await dailyLoginModule.default(true); // Pass true for single transaction
+                    // Read private keys
+                    const privateKeys = fs.readFileSync('privatekeys.txt', 'utf-8')
+                        .split('\n')
+                        .map(line => line.trim())
+                        .filter(line => line && !line.startsWith('#') && line.length === 64);
                     
-                    if (transactionSuccess) {
-                        // Add a small delay between transaction and tasks
-                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    console.log(chalk.cyan(`\n📝 Found ${privateKeys.length} wallets to process`));
+                    
+                    // Process all wallets
+                    for (let i = 0; i < privateKeys.length; i++) {
+                        console.log(chalk.yellow(`\nProcessing wallet ${i + 1} of ${privateKeys.length}`));
+                        const wallet = new ethers.Wallet(privateKeys[i], provider);
                         
-                        // Complete tasks using shardClaim module
-                        const shardClaimModule = await import('./src/shardClaim.js');
-                        await shardClaimModule.default();
+                        // Step 1: Do transaction
+                        console.log(chalk.cyan('\n📝 Step 1: Performing transaction...'));
+                        const dailyLoginModule = await import('./src/dailyLogin.js');
+                        const txSuccess = await dailyLoginModule.default(true, wallet, true); // Pass true to skip task completion
                         
-                        console.log(chalk.green('✅ Auto All process completed!'));
-                    } else {
-                        console.log(chalk.red('❌ Auto All process failed at transaction step'));
+                        if (txSuccess) {
+                            // Step 2: Complete task
+                            console.log(chalk.cyan('\n📝 Step 2: Completing task...'));
+                            const shardClaimModule = await import('./src/shardClaim.js');
+                            await shardClaimModule.default();
+                        } else {
+                            console.log(chalk.red(`❌ Transaction failed for wallet ${i + 1}`));
+                        }
+                        
+                        // Add delay between wallets
+                        if (i < privateKeys.length - 1) {
+                            await new Promise(resolve => setTimeout(resolve, 5000));
+                        }
                     }
+                    
+                    console.log(chalk.green('\n✅ Auto All process completed!'));
                 } catch (error) {
                     console.error(chalk.red('❌ Error in Auto All process:'), error);
                 }
