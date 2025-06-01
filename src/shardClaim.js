@@ -343,7 +343,7 @@ async function sendCheckTask(accessToken, taskID, address) {
                     status: "1"
                 };
             } else if (flushData === 4) {
-                log(address, `⚠️ Task ${taskID} - Already claimed`, 'yellow');
+                log(address, `✅ Task ${taskID} - Already claimed`, 'green');
                 return {
                     completed: true,
                     progress: 100,
@@ -397,7 +397,7 @@ async function sendCheckTask(accessToken, taskID, address) {
         await sendTaskClaim(accessToken, taskID, address);
         taskCompleted = true;
     } else if (status === "3") {
-        log(address, `⚠️ Task ${taskID} - Already claimed`, 'yellow');
+        log(address, `✅ Task ${taskID} - Already claimed`, 'green');
         taskCompleted = true;
     }
 
@@ -441,6 +441,30 @@ async function sendTaskClaim(accessToken, taskID, address) {
 
     if (responseData.success) {
         log(address, `✅ Task is claimed`, 'green');
+        // Verify the claim was successful
+        await delay(2000);
+        const verifyResponse = await fetch("https://legends.saharalabs.ai/api/v1/task/dataBatch", {
+            method: "POST",
+            headers: { 
+                "Content-Type": "application/json", 
+                "authorization": `Bearer ${accessToken}`,
+                "accept": "application/json",
+                "origin": "https://legends.saharalabs.ai",
+                "referer": "https://legends.saharalabs.ai/?code=THWD0T",
+                "user-agent": "Mozilla/5.0"
+            },
+            body: JSON.stringify({ 
+                taskIDs: [taskID], 
+                timestamp: Date.now().toString() 
+            })
+        });
+
+        if (verifyResponse.ok) {
+            const verifyData = await verifyResponse.json();
+            if (verifyData[taskID]?.status === "3") {
+                log(address, `✅ Task ${taskID} - Successfully claimed`, 'green');
+            }
+        }
     }
 }
 
