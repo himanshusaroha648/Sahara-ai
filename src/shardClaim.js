@@ -10,6 +10,12 @@ import path from 'path';
 
 dotenv.config();
 
+// Utility functions
+function maskedAddress(address) {
+    if (!address) return '';
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
 // Helper functions
 function appendLog(message) {
     const timestamp = moment().tz('Asia/Jakarta').format('YYYY-MM-DD HH:mm:ss');
@@ -17,10 +23,43 @@ function appendLog(message) {
 }
 
 function readPrivateKeys() {
-    return fs.readFileSync('privatekeys.txt', 'utf-8')
-        .split('\n')
-        .map(line => line.trim())
-        .filter(Boolean);
+    try {
+        const content = fs.readFileSync('privatekeys.txt', 'utf-8');
+        const lines = content.split('\n');
+        const keys = [];
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            
+            // Skip empty lines and comments
+            if (!line || line.startsWith('#')) continue;
+            
+            // Remove '0x' prefix if present
+            const key = line.startsWith('0x') ? line.slice(2) : line;
+            
+            // Validate private key format
+            if (key.length !== 64 || !/^[0-9a-fA-F]+$/.test(key)) {
+                console.log(chalk.red(`❌ Invalid private key format at line ${i + 1}:`));
+                console.log(chalk.yellow(`Expected: 64 hexadecimal characters`));
+                console.log(chalk.yellow(`Got: ${key.length} characters`));
+                continue;
+            }
+            
+            keys.push(key);
+        }
+        
+        if (keys.length === 0) {
+            console.log(chalk.red("❌ No valid private keys found in privatekeys.txt"));
+            process.exit(1);
+        }
+        
+        console.log(chalk.green(`✅ Successfully loaded ${keys.length} valid private keys`));
+        return keys;
+    } catch (error) {
+        console.log(chalk.red("❌ Error reading privatekeys.txt:"));
+        console.log(chalk.yellow("Please ensure the file exists and is readable"));
+        process.exit(1);
+    }
 }
 
 async function waitForEnter() {
@@ -67,17 +106,110 @@ const colorMap = {
     violet: chalk.magenta
 };
 
+function formatAddress(address) {
+    if (!address) return '';
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
 function log(address, message, color = 'green') {
     const timestamp = new Date().toISOString().replace("T", " ").slice(0, 19);
-    const logMessage = address 
-        ? `[${timestamp} | ${maskedAddress(address)}] ${message}`
-        : "";
-    const colorFn = colorMap[color] || chalk.yellow; // fallback to yellow
+    let logMessage = "";
+    if (address) {
+        const maskedAddr = formatAddress(address);
+        logMessage = `[${timestamp} | ${maskedAddr}] ${message}`;
+    }
+    const colorFn = colorMap[color] || chalk.yellow;
     console.log(colorFn(logMessage));
     logToFile(logMessage);
 }
 
-const maskedAddress = (address) => `${address.slice(0, 6)}...${address.slice(-4)}`;
+// Function to process a single wallet
+async function processWallet(wallet) {
+    try {
+        console.log(chalk.blue(`🚀 Processing Wallet: ${wallet.address}`));
+        
+        // Check balance
+        const balance = await provider().getBalance(wallet.address);
+        const balanceInEth = ethers.formatEther(balance);
+        console.log(chalk.yellow(`Current Balance: ${balanceInEth} ETH`));
+        
+        // Generate random transaction value between 0.00001 and 0.00005
+        const minValue = 0.00001;
+        const maxValue = 0.00005;
+        const randomValue = (Math.random() * (maxValue - minValue) + minValue).toFixed(8);
+        const txValue = ethers.parseEther(randomValue.toString());
+        
+        // Create transaction with lower gas prices
+        const tx = {
+            to: "0x310f9f43998e8a71a75ec180ac2ffa2be204af91",
+            value: txValue,
+            data: "0x",
+            gasLimit: 21000,
+            maxFeePerGas: ethers.parseUnits("50", "gwei"),  // 50 gwei
+            maxPriorityFeePerGas: ethers.parseUnits("10", "gwei"),  // 10 gwei
+            type: 2
+        };
+
+        // Calculate total cost
+        const maxGasCost = tx.maxFeePerGas * BigInt(tx.gasLimit);
+        const totalCost = tx.value + maxGasCost;
+        
+        // Check if we have enough balance
+        if (balance < totalCost) {
+            console.log(chalk.red(`❌ Insufficient balance. Need ${ethers.formatEther(totalCost)} ETH`));
+            console.log(chalk.yellow(`Transaction Value: ${randomValue} ETH`));
+            console.log(chalk.yellow(`Gas Cost: ${ethers.formatEther(maxGasCost)} ETH`));
+            return false;
+        }
+
+        console.log(chalk.yellow(`Transaction Value: ${randomValue} ETH`));
+        console.log(chalk.yellow(`Gas Price - Max Fee: ${ethers.formatUnits(tx.maxFeePerGas, "gwei")} gwei, Priority Fee: ${ethers.formatUnits(tx.maxPriorityFeePerGas, "gwei")} gwei`));
+
+        // Send transaction
+        const transaction = await wallet.sendTransaction(tx);
+        console.log(chalk.green(`✅ Transaction sent! Hash: ${transaction.hash}`));
+        
+        // Wait for confirmation
+        const receipt = await transaction.wait();
+        console.log(chalk.green(`✅ Transaction confirmed!`));
+        
+        return true;
+    } catch (error) {
+        if (error.message.includes('insufficient funds')) {
+            console.log(chalk.magenta(`❌ Insufficient funds for ${wallet.address}`));
+            try {
+                const balance = await provider().getBalance(wallet.address);
+                const balanceInEth = ethers.formatEther(balance);
+                console.log(chalk.yellow(`Balance: ${balanceInEth} ETH`));
+            } catch (balanceError) {
+                console.log(chalk.red(`❌ Error getting balance: ${balanceError.message}`));
+            }
+        } else if (error.message.includes('insufficient fee')) {
+            console.log(chalk.red("❌ Gas price too low, retrying with higher gas..."));
+            try {
+                // Retry with higher gas prices
+                const retryTx = {
+                    ...tx,
+                    maxFeePerGas: ethers.parseUnits("100", "gwei"),  // 100 gwei
+                    maxPriorityFeePerGas: ethers.parseUnits("20", "gwei"),  // 20 gwei
+                };
+                
+                const transaction = await wallet.sendTransaction(retryTx);
+                console.log(chalk.green(`✅ Retry transaction sent! Hash: ${transaction.hash}`));
+                
+                const receipt = await transaction.wait();
+                console.log(chalk.green(`✅ Retry transaction confirmed!`));
+                
+                return true;
+            } catch (retryError) {
+                console.log(chalk.red(`❌ Retry failed: ${retryError.message}`));
+            }
+        } else {
+            console.log(chalk.red(`❌ Error: ${error.message}`));
+        }
+        return false;
+    }
+}
 
 // Function to get challenge from the API
 async function getChallenge(address) {
@@ -143,43 +275,6 @@ async function signChallenge(wallet) {
     }
 }
 
-// Main task function for checking and claiming task 1004
-async function sendTaskClaim(accessToken, taskID, address) {
-    log(address, `🔹 Claiming Task ${taskID}...`);
-    await delay(5000);
-
-    const response = await fetch("https://legends.saharalabs.ai/api/v1/task/claim", {
-        method: "POST",
-        headers: { 
-            "Content-Type": "application/json", 
-            "authorization": `Bearer ${accessToken}`,
-            "accept": "application/json",
-            "origin": "https://legends.saharalabs.ai",
-            "referer": "https://legends.saharalabs.ai/?code=THWD0T",
-            "user-agent": "Mozilla/5.0"
-        },
-        body: JSON.stringify({ 
-            taskID, 
-            timestamp: Date.now().toString() 
-        })
-    });
-
-    const responseData = await response.json();
-    
-    if (!response.ok) {
-        return; // Silently handle the error without logging
-    }
-
-    if (responseData.success) {
-        log(address, `✅ Task ${taskID} - Successfully claimed.`);
-    }
-}
-
-// Add these variables at the top level
-let alreadyClaimedCount = 0;
-let notTransactionCount = 0;
-let taskSuccessCount = 0;
-
 // Function to get user info
 async function getUserInfo(accessToken, address) {
     log(address, "🔹 Fetching user info...");
@@ -207,102 +302,19 @@ async function getUserInfo(accessToken, address) {
 
     const data = await response.json();
     const timestamp = new Date().toISOString().replace("T", " ").slice(0, 19);
-    const logMessage = `[${timestamp} | ${maskedAddress(address)}] 💎 Shard Amount: ${data.shardAmount}`;
-    console.log(chalk.magentaBright(logMessage));  // Changed to magentaBright color
+    const maskedAddr = formatAddress(address);
+    const logMessage = `[${timestamp} | ${maskedAddr}] 💎 Shard Amount: ${data.shardAmount}`;
+    console.log(chalk.magentaBright(logMessage));
     logToFile(logMessage);
     return data;
 }
 
-async function sendDailyTask(wallet, index, total) {
-    try {
-        log(wallet.address, `🔹 Processing wallet: ${wallet.address} [ ${index + 1}/${total} ]`);
-        const { accessToken } = await signChallenge(wallet);
-        if (!accessToken) {
-            throw new Error(`❌ Access token not found!`);
-        }
-
-        // Get user info to display shard amount
-        await getUserInfo(accessToken, wallet.address);
-
-        const taskID = "1004";  // Only task 1004
-        const taskStatus = await sendCheckTask(accessToken, taskID, wallet.address);
-        
-        if (taskStatus.completed && taskStatus.status !== "3") {
-            log(wallet.address, "✅ Task completed successfully.");
-        }
-        log("", "");
-    } catch (error) {
-        if (error.message.includes('insufficient funds')) {
-            console.log(chalk.magenta(`insufficient funds`));
-            // Get and display balance
-            try {
-                const balance = await provider().getBalance(wallet.address);
-                const balanceInEth = ethers.formatEther(balance);
-                console.log(chalk.yellow(`Balance: ${balanceInEth} ETH`));
-            } catch (balanceError) {
-                // Ignore balance error
-            }
-        } else {
-            log(wallet.address, `❌ Error: ${error.message}`);
-        }
-    }
-}
-
-// Modify the startBot function
-async function startBot() {
-    try {
-        fs.writeFileSync(logFile, "");
-        const privateKeys = fs.readFileSync('privatekeys.txt', 'utf-8').split('\n').map(line => line.trim()).filter(Boolean);
-        const totalWallets = privateKeys.length;
-
-        // Reset counters
-        alreadyClaimedCount = 0;
-        notTransactionCount = 0;
-        taskSuccessCount = 0;
-
-        for (let i = 0; i < privateKeys.length; i++) {
-            const wallet = new ethers.Wallet(privateKeys[i]);
-            log("", `🔹 Processing wallet: ${wallet.address} [ ${i + 1}/${totalWallets} ]`);
-            
-            // Process one wallet at a time
-            await sendDailyTask(wallet, i, totalWallets);
-            
-            // Add a small delay between wallets
-            await delay(5000);
-        }
-
-        // Add a delay before showing final stats
-        await delay(3000);
-        
-        // Display final statistics once
-        console.log("\n");
-        console.log(chalk.blue("=== Final Statistics ==="));
-        console.log(chalk.yellow(`already claimed  [ ${alreadyClaimedCount} ]`));
-        console.log(chalk.yellow(`Not Transaction  [ ${notTransactionCount} ]`));
-        console.log(chalk.green(`Task successfully [ ${taskSuccessCount} ]`));
-        console.log(chalk.blue("====================="));
-        console.log("\n");
-
-        // Also log to file once
-        logToFile("\n=== Final Statistics ===");
-        logToFile(`already claimed  [ ${alreadyClaimedCount} ]`);
-        logToFile(`Not Transaction  [ ${notTransactionCount} ]`);
-        logToFile(`Task successfully [ ${taskSuccessCount} ]`);
-        logToFile("=====================\n");
-
-    } catch (error) {
-        console.error("Error in startBot:", error);
-    }
-}
-
-// Modify sendCheckTask to track statistics
+// Function to check and claim task
 async function sendCheckTask(accessToken, taskID, address) {
-    log(address, `🔹 Checking Task ${taskID} status...`, 'blue');
     await delay(5000);
 
     // First flush the task
     if (taskID === "1004") {
-        log(address, `🔄 Flushing Task ${taskID}...`, 'blue');
         const flushResponse = await fetch("https://legends.saharalabs.ai/api/v1/task/flush", {
             method: "POST",
             headers: { 
@@ -321,19 +333,13 @@ async function sendCheckTask(accessToken, taskID, address) {
 
         if (flushResponse.ok) {
             const flushData = await flushResponse.json();
-            if (flushData === 2) {
-                log(address, `🔄 One Transaction Featching....`, 'yellow');
-            } else if (flushData === 4) {
-                log(address, `✅ Task ${taskID} already claimed.`, 'yellow');
-                alreadyClaimedCount++;
+            if (flushData === 4) {
                 return {
                     completed: true,
                     progress: 100,
                     requiredProgress: 100,
                     status: "3"
                 };
-            } else {
-                log(address, `🔄 Flush Response: ${JSON.stringify(flushData)}`, 'green');
             }
         }
         await delay(5000);
@@ -370,34 +376,103 @@ async function sendCheckTask(accessToken, taskID, address) {
 
     if (status === "1") {
         if (progress >= requiredProgress) {
-            log(address, `🔹 Task ${taskID} is ready to claim...`, 'green');
             await sendTaskClaim(accessToken, taskID, address);
             taskCompleted = true;
-            taskSuccessCount++;
-        } else {
-            log(address, `⚠️ One Transaction`, 'yellow');
-            notTransactionCount++;
         }
     } else if (status === "2") {
-        log(address, `🔹 Task ${taskID} is claimable, claiming reward...`, 'green');
         await sendTaskClaim(accessToken, taskID, address);
         taskCompleted = true;
-        taskSuccessCount++;
     } else if (status === "3") {
-        log(address, `✅ Task ${taskID} already claimed.`, 'yellow');
-        alreadyClaimedCount++;
         taskCompleted = true;
-    } else {
-        log(address, `⚠️ One Transaction`, 'yellow');
-        notTransactionCount++;
     }
 
     return {
         completed: taskCompleted,
-        progress: progress,
-        requiredProgress: requiredProgress,
-        status: status
+        progress,
+        requiredProgress,
+        status
     };
 }
 
-export default startBot; 
+// Function to claim task
+async function sendTaskClaim(accessToken, taskID, address) {
+    await delay(5000);
+
+    const response = await fetch("https://legends.saharalabs.ai/api/v1/task/claim", {
+        method: "POST",
+        headers: { 
+            "Content-Type": "application/json", 
+            "authorization": `Bearer ${accessToken}`,
+            "accept": "application/json",
+            "origin": "https://legends.saharalabs.ai",
+            "referer": "https://legends.saharalabs.ai/?code=THWD0T",
+            "user-agent": "Mozilla/5.0"
+        },
+        body: JSON.stringify({ 
+            taskID, 
+            timestamp: Date.now().toString() 
+        })
+    });
+
+    const responseData = await response.json();
+    
+    if (!response.ok) {
+        if (responseData.message?.includes('insufficient balance')) {
+            throw new Error('insufficient balance');
+        } else {
+            throw new Error(`❌ Task claim failed: ${JSON.stringify(responseData)}`);
+        }
+    }
+}
+
+// Main function to process all wallets
+async function processAllWallets() {
+    try {
+        const privateKeys = readPrivateKeys();
+        
+        // Process all wallets
+        for (let i = 0; i < privateKeys.length; i++) {
+            const privateKey = privateKeys[i];
+            const wallet = new ethers.Wallet(privateKey, provider());
+            
+            try {
+                const { accessToken } = await signChallenge(wallet);
+                await getUserInfo(accessToken, wallet.address);
+                
+                // Process only task 1004
+                try {
+                    const taskResult = await sendCheckTask(accessToken, "1004", wallet.address);
+                    if (taskResult.completed) {
+                        if (taskResult.status === "3") {
+                            console.log(chalk.yellow(`✅ Task 1004 - Already claimed`));
+                        } else {
+                            console.log(chalk.green(`✅ Task 1004 - Successfully claimed`));
+                        }
+                    }
+                } catch (taskError) {
+                    if (taskError.message.includes('insufficient balance')) {
+                        console.log(chalk.red(`❌ Task 1004 - Insufficient balance`));
+                    }
+                }
+                
+            } catch (error) {
+                console.log(chalk.red(`❌ Error processing wallet ${i + 1}: ${error.message}`));
+                continue;
+            }
+            
+            // Add delay between wallets
+            if (i < privateKeys.length - 1) {
+                await delay(5000);
+            }
+        }
+        
+    } catch (error) {
+        console.log(chalk.red(`❌ Error: ${error.message}`));
+        throw error;
+    }
+}
+
+// Export the main function as default
+export default processAllWallets;
+
+// ... rest of the existing code ...
